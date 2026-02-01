@@ -70,6 +70,19 @@ GATEWAYS = [
     'PaySafeCard', 'Epay', 'Neteller', 'Moneybookers', 'ClickandBuy', 'CashU'
 ]
 
+DONATE_KEYWORDS = [
+    'donate', 'donation', 'contribute', 'contribution', 'support', 'supporter',
+    'funding', 'fund', 'sponsor', 'sponsorship', 'patron', 'patronage',
+    'charity', 'charitable', 'nonprofit', 'non-profit', 'fundraiser', 'fundraising',
+    'campaign', 'help us', 'help support', 'make a donation', 'give now',
+    'contribute now', 'support us', 'support our', 'help our', 'donate now',
+    'donation page', 'donation form', 'donation button', 'donate button',
+    'give', 'giving', 'gifts', 'gift', 'contribution form', 'pledge',
+    'pledging', 'member', 'membership', 'subscribe', 'subscription',
+    'crowdfunding', 'crowdfund', 'kickstarter', 'patreon', 'buymeacoffee',
+    'kofi', 'gofundme', 'fundly', 'indiegogo', 'tilt', 'razoo', 'givebutter'
+]
+
 EXTENDED_KEYWORDS = [
     'checkout', 'cart', 'payment', 'billing', 'shipping', 'order', 'purchase',
     'buy now', 'add to cart', 'secure checkout', 'pay with', 'credit card',
@@ -79,11 +92,6 @@ EXTENDED_KEYWORDS = [
     'gateway', 'processor', 'api key', 'secret key', 'public key', 'token',
     'auth', 'capture', 'refund', 'chargeback', 'dispute', 'fraud', 'risk',
     'compliance', 'pci dss', '3d secure', 'cvv', 'expiry', 'cardholder'
-]
-
-DONATE_KEYWORDS = [
-    'donate', 'donation', 'contribute', 'support', 'funding', 'sponsor',
-    'patron', 'charity', 'nonprofit', 'fundraiser', 'campaign'
 ]
 
 class ProXyMaNaGeR:
@@ -285,6 +293,39 @@ class RePoRtGeNeRaToR:
         html += "</table></body></html>"
         return html
 
+class DoNaTiOnFiLtEr:
+    @staticmethod
+    def has_donation_keywords(html_content, url):
+        if not html_content:
+            return False
+        
+        content_lower = html_content.lower()
+        url_lower = url.lower()
+        
+        donation_count = 0
+        for keyword in DONATE_KEYWORDS:
+            if keyword.lower() in content_lower:
+                donation_count += 1
+            if keyword.lower() in url_lower:
+                donation_count += 2
+        
+        return donation_count >= 2
+    
+    @staticmethod
+    def extract_donation_keywords_found(html_content, url):
+        found_keywords = []
+        if not html_content:
+            return found_keywords
+        
+        content_lower = html_content.lower()
+        url_lower = url.lower()
+        
+        for keyword in DONATE_KEYWORDS:
+            if keyword.lower() in content_lower or keyword.lower() in url_lower:
+                found_keywords.append(keyword)
+        
+        return list(set(found_keywords))
+
 class GaTeS_DoRkEr:
     def __init__(self, max_workers=200, timeout=10):
         self.user_agents = USER_AGENTS
@@ -310,6 +351,7 @@ class GaTeS_DoRkEr:
         }
         self.cache_manager = CaChEMaNaGeR()
         self.rate_limiter = RaTeLiMiTeR(10)
+        self.donation_filter = DoNaTiOnFiLtEr()
 
     def get_agent(self):
         return random.choice(self.user_agents)
@@ -431,6 +473,10 @@ class GaTeS_DoRkEr:
         for keyword in EXTENDED_KEYWORDS:
             if keyword in content:
                 score += 1
+        
+        for keyword in DONATE_KEYWORDS:
+            if keyword.lower() in content:
+                score += 3
                 
         return score
 
@@ -475,8 +521,11 @@ class GaTeS_DoRkEr:
         if not html: 
             return
 
+        if not self.donation_filter.has_donation_keywords(html, url):
+            return
+
         score = self.calculate_score(html)
-        if score < 10: 
+        if score < 15: 
             return
 
         found_gateways = set()
@@ -499,10 +548,10 @@ class GaTeS_DoRkEr:
                 if gateway.lower() in src or gateway.lower() in alt:
                     found_gateways.add(gateway)
 
-        has_donate_keyword = any(kw in content_lower for kw in DONATE_KEYWORDS)
-
-        if found_gateways and has_donate_keyword:
+        if found_gateways:
             metadata = self.extract_metadata(soup, url)
+            donation_keywords_found = self.donation_filter.extract_donation_keywords_found(html, url)
+            
             with self.lock:
                 if domain not in self.displayed_domains:
                     self.displayed_domains.add(domain)
@@ -514,6 +563,7 @@ class GaTeS_DoRkEr:
                         'gateways': list(found_gateways),
                         'score': score,
                         'metadata': metadata,
+                        'donation_keywords': donation_keywords_found,
                         'timestamp': datetime.now().isoformat()
                     }
                     self.results.append(result_entry)
@@ -532,7 +582,7 @@ class GaTeS_DoRkEr:
                     with self.lock:
                         if new_url not in self.processed_urls and len(self.processed_urls) < 100000:
                             self.processed_urls.add(new_url)
-                            priority = 1 if any(x in new_url.lower() for x in ['checkout', 'pay', 'cart', 'billing', 'order', 'donate']) else 3
+                            priority = 1 if any(x in new_url.lower() for x in ['checkout', 'pay', 'cart', 'billing', 'order', 'donate', 'donation', 'contribution']) else 3
                             self.url_queue.put((priority, new_url))
 
     def worker(self):
@@ -964,6 +1014,14 @@ HTML_TEMPLATE = '''
             color: #40e0d0;
             font-size: 12px;
             font-weight: 600;
+            margin-bottom: 8px;
+        }
+        
+        .result-keywords {
+            color: #ffb700;
+            font-size: 11px;
+            font-weight: 600;
+            margin-bottom: 8px;
         }
         
         .result-score {
@@ -1092,7 +1150,7 @@ HTML_TEMPLATE = '''
         
         <div class="bio">
             <div class="bio-image">🔍</div>
-            <div class="bio-text">Advanced Payment Gateway Hunter | Google Dorking Tool | Multi-Engine Search</div>
+            <div class="bio-text">Advanced Payment Gateway Hunter | Google Dorking Tool | Multi-Engine Search | DoNaTiOn FiLtErEd</div>
         </div>
         
         <div class="options">
@@ -1178,20 +1236,23 @@ HTML_TEMPLATE = '''
             const resultsContainer = document.getElementById('resultsContainer');
             
             if (results.length === 0) {
-                resultsContainer.innerHTML = '<div class="error-message">No GaTeWaYs FoUnD</div>';
+                resultsContainer.innerHTML = '<div class="error-message">No DoNaTiOn GaTeWaYs FoUnD</div>';
                 return;
             }
             
             let html = '<div class="stats">';
-            html += '<div class="stats-item">FoUnD: <span class="stats-number">' + totalFound + '</span></div>';
+            html += '<div class="stats-item">FoUnD: <span class="stats-number">' + results.length + '</span></div>';
             html += '<div class="stats-item">ScAnNeD: <span class="stats-number">' + scannedUrls + '</span></div>';
             html += '</div>';
             
             results.forEach(result => {
                 html += '<div class="result-item">';
                 html += '<div class="result-url"><a href="' + result.url + '" target="_blank">' + result.url + '</a></div>';
-                html += '<div class="result-gateways">GaTeWaYs: ' + result.gateways.join(', ') + '</div>';
-                html += '<div class="result-score">ScOrE: ' + result.score + ' | DoMaIn: ' + result.domain + '</div>';
+                html += '<div class="result-gateways">💳 GaTeWaYs: ' + result.gateways.join(', ') + '</div>';
+                if (result.donation_keywords && result.donation_keywords.length > 0) {
+                    html += '<div class="result-keywords">🎯 DoNaTiOn: ' + result.donation_keywords.join(', ') + '</div>';
+                }
+                html += '<div class="result-score">⭐ ScOrE: ' + result.score + ' | 🌐 DoMaIn: ' + result.domain + '</div>';
                 html += '</div>';
             });
             
